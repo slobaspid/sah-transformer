@@ -11,6 +11,8 @@ class ModelConfig:
     skill_emb: int = 128
     temporal_dim: int = 21
     mdn_components: int = 3
+    t_ctx: int = 128
+    gab_rank: int = 4
     n_skill_tokens: int = 2        # self + opponent
 
     @property
