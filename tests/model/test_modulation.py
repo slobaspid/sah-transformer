@@ -32,3 +32,42 @@ def test_encoder_no_film_matches_baseline():
     enc = TransformerEncoder(c)
     x = torch.randn(2, c.seq_len, c.d_model)
     assert torch.allclose(enc(x), enc(x, film=None))
+
+from sahformer.model.modulation import GeometricAttentionBias
+
+def test_gab_bias_shape():
+    c = ModelConfig()
+    gab = GeometricAttentionBias(c)
+    board = torch.randn(3, 64, c.d_model)
+    t = torch.randn(3, c.t_ctx)
+    ss = torch.randn(3, c.d_model)
+    so = torch.randn(3, c.d_model)
+    bias = gab(board, t, ss, so)
+    assert bias.shape == (3, c.n_heads, c.seq_len, c.seq_len)
+
+def test_gab_skill_token_rows_are_zero():
+    c = ModelConfig()
+    gab = GeometricAttentionBias(c)
+    bias = gab(torch.randn(2, 64, c.d_model), torch.randn(2, c.t_ctx),
+               torch.randn(2, c.d_model), torch.randn(2, c.d_model))
+    nsk = c.n_skill_tokens
+    assert torch.count_nonzero(bias[:, :, :nsk, :]) == 0
+    assert torch.count_nonzero(bias[:, :, :, :nsk]) == 0
+
+def test_gab_bias_depends_on_time():
+    c = ModelConfig()
+    gab = GeometricAttentionBias(c)
+    board = torch.randn(2, 64, c.d_model)
+    ss = torch.randn(2, c.d_model)
+    so = torch.randn(2, c.d_model)
+    b_calm = gab(board, torch.zeros(2, c.t_ctx), ss, so)
+    b_panic = gab(board, torch.ones(2, c.t_ctx) * 3.0, ss, so)
+    assert not torch.allclose(b_calm, b_panic)
+
+def test_gab_gradients():
+    c = ModelConfig()
+    gab = GeometricAttentionBias(c)
+    t = torch.randn(2, c.t_ctx, requires_grad=True)
+    gab(torch.randn(2, 64, c.d_model), t, torch.randn(2, c.d_model),
+        torch.randn(2, c.d_model)).sum().backward()
+    assert t.grad is not None and torch.isfinite(t.grad).all()
