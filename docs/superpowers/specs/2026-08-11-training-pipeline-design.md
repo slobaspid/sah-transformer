@@ -126,3 +126,12 @@ tests/
 
 Full-scale training run, Colab/Drive checkpoint targets, learning-rate/loss-weight sweeps,
 and the eval-vs-Maia move-matching + think-time-distribution benchmark.
+
+**Stochasticity / non-deterministic play (to be discussed).** The goal is a human-feeling,
+distributional model, not deterministic argmax play. Plan 4 stays neutral on this: it only
+trains and logs metrics — it never plays games, and its policy loss is already the
+distributional cross-entropy. `move_accuracy` is a **logged sanity metric only**; the best
+checkpoint is chosen by **lowest total loss**, never by top-1 accuracy, so training does not
+optimize toward a peaked/deterministic policy. Inference-time sampling (temperature over the
+policy, sampling the MDN) and any explicit stochasticity (e.g. a per-game style latent) are
+open design questions for the eval/play plan, deliberately not settled here.
