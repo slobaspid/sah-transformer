@@ -2,23 +2,29 @@ from dataclasses import dataclass
 
 @dataclass
 class ModelConfig:
-    n_squares: int = 64
-    in_channels: int = 96          # 12 planes x (1 current + 7 history)
-    d_model: int = 256
-    n_layers: int = 8
-    n_heads: int = 8
+    history: int = 8              # current + 7 past
+    dim_emb: int = 128            # skill embedding width
+    dim_vit: int = 256            # d_model
+    num_blocks: int = 8
+    num_heads: int = 8
     mlp_ratio: int = 2
-    skill_emb: int = 128
-    temporal_dim: int = 21
+    gab_gen_size: int = 64        # d3
+    gab_intermediate_dim: int = 64  # d2
+    gab_per_square_dim: int = 0   # d1 (0 => avg-pool variant)
+    head_hid_dim: int = 256
     mdn_components: int = 3
-    t_ctx: int = 128
-    gab_rank: int = 4
-    n_skill_tokens: int = 2        # self + opponent
+    n_squares: int = 64
+    temporal_dim: int = 21        # Plan 3
+    t_ctx: int = 128              # Plan 3
+
+    @property
+    def in_channels(self) -> int:
+        return 12 * self.history
+
+    @property
+    def token_in(self) -> int:
+        return self.in_channels + 2 * self.dim_emb
 
     @property
     def head_dim(self) -> int:
-        return self.d_model // self.n_heads
-
-    @property
-    def seq_len(self) -> int:
-        return self.n_skill_tokens + self.n_squares
+        return self.dim_vit // self.num_heads
