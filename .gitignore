@@ -6,3 +6,5 @@ data/
 *.pgn
 *.pgn.zst
 .pytest_cache/
+checkpoints/
+.claude/settings.local.json
