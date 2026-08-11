@@ -1,5 +1,5 @@
 python-chess==1.999
-numpy==2.1.0
+numpy==1.26.4
 zstandard==0.23.0
 pytest==8.3.0
 torch==2.4.0
