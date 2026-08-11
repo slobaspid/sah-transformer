@@ -15,12 +15,12 @@ class MultiHeadAttention(nn.Module):
     def forward(self, x, attn_bias=None):
         b, s, _ = x.shape
         qkv = self.qkv(x).reshape(b, s, 3, self.h, self.dh).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]              # (B,h,S,dh)
-        logits = (q @ k.transpose(-2, -1)) / math.sqrt(self.dh)  # (B,h,S,S)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        logits = (q @ k.transpose(-2, -1)) / math.sqrt(self.dh)
         if attn_bias is not None:
             logits = logits + attn_bias
         attn = F.softmax(logits, dim=-1)
-        ctx = attn @ v                                # (B,h,S,dh)
+        ctx = attn @ v
         ctx = ctx.transpose(1, 2).reshape(b, s, self.h * self.dh)
         return self.out(ctx)
 
@@ -35,9 +35,12 @@ class TransformerBlock(nn.Module):
             nn.Linear(cfg.d_model, hidden), nn.GELU(), nn.Linear(hidden, cfg.d_model)
         )
 
-    def forward(self, x, attn_bias=None):
+    def forward(self, x, attn_bias=None, film=None):
         x = x + self.attn(self.ln1(x), attn_bias=attn_bias)
         x = x + self.mlp(self.ln2(x))
+        if film is not None:
+            gamma, beta = film                      # each (B, d_model)
+            x = gamma.unsqueeze(1) * x + beta.unsqueeze(1)
         return x
 
 class TransformerEncoder(nn.Module):
@@ -46,7 +49,11 @@ class TransformerEncoder(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
 
-    def forward(self, x, attn_bias=None):
-        for blk in self.blocks:
-            x = blk(x, attn_bias=attn_bias)
+    def forward(self, x, attn_bias=None, film=None):
+        for i, blk in enumerate(self.blocks):
+            layer_film = None
+            if film is not None:
+                gamma_all, beta_all = film          # each (B, n_layers, d_model)
+                layer_film = (gamma_all[:, i, :], beta_all[:, i, :])
+            x = blk(x, attn_bias=attn_bias, film=layer_film)
         return self.ln_f(x)
