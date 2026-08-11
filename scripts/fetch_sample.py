@@ -1,43 +1,32 @@
-"""Stream a tiny 3+0 sample from a Lichess .pgn.zst URL into one balanced shard.
+"""Stream a 3+0 sample from a Lichess .pgn.zst URL into chunked shards.
 
-Only the first chunk of the archive is transferred (we early-stop at --max-games).
+Only the first chunk of the archive is transferred (we early-stop at --max-positions),
+and memory stays flat regardless of dataset size (writes one chunk at a time).
 
 Usage:
-    python scripts/fetch_sample.py URL data/ --max-games 2000 --seed 0
+    python scripts/fetch_sample.py URL OUTDIR --max-positions 300000 --chunk 150000
 """
 import argparse
-import os
-from sahformer.download import stream_games_from_url, is_target_game
-from sahformer.records import game_to_records
-from sahformer.shards import records_to_arrays, balance_indices, save_shard
+from sahformer.download import stream_games_from_url
+from sahformer.dataset_build import build_shards, records_from_games
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url")
     ap.add_argument("outdir")
-    ap.add_argument("--max-games", type=int, default=2000)
+    ap.add_argument("--max-positions", type=int, default=300000)
+    ap.add_argument("--chunk", type=int, default=150000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--balance", action="store_true", help="Elo-balance each chunk")
     args = ap.parse_args()
-    os.makedirs(args.outdir, exist_ok=True)
 
-    records = []
-    kept = 0
-    for game in stream_games_from_url(args.url):
-        if not is_target_game(game):
-            continue
-        records.extend(game_to_records(game))
-        kept += 1
-        if kept >= args.max_games:
-            break
-
-    if kept == 0:
+    paths = build_shards(
+        records_from_games(stream_games_from_url(args.url)),
+        args.outdir, chunk_positions=args.chunk, max_positions=args.max_positions,
+        balance=args.balance, seed=args.seed, progress_every=2000)
+    if not paths:
         raise SystemExit("no target (3+0 with clocks) games found — try a 2017-04+ month")
-    arr = records_to_arrays(records)
-    idx = balance_indices(arr["elo_self"], seed=args.seed)
-    balanced = {k: v[idx] for k, v in arr.items()}
-    out = os.path.join(args.outdir, "sample.npz")
-    save_shard(out, balanced)
-    print(f"target_games={kept} positions_kept={len(idx)} -> {out}")
+    print(f"wrote {len(paths)} shard(s) to {args.outdir}")
 
 if __name__ == "__main__":
     main()

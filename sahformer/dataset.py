@@ -1,3 +1,4 @@
+import bisect
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -6,23 +7,31 @@ _KEYS = ["board", "history", "stm", "elo_self", "elo_opp", "temporal",
          "move_from", "move_to", "promo", "result", "think_time"]
 
 class ShardDataset(Dataset):
-    """Loads one or more .npz shards fully into memory (Colab-sized shards)."""
+    """Loads one or more .npz shards into memory and indexes across them without
+    concatenating, so peak RAM is ~1x the data (not 2x)."""
     def __init__(self, shard_paths):
-        self.data = {k: [] for k in _KEYS}
+        self.shards = []        # one dict of arrays per shard
+        self._cum = []          # cumulative lengths, for global i -> (shard, row)
+        total = 0
         for path in shard_paths:
             with np.load(path) as z:
-                for k in _KEYS:
-                    self.data[k].append(z[k])
-        self.data = {k: np.concatenate(v, axis=0) for k, v in self.data.items()}
-        self.n = self.data["board"].shape[0]
+                d = {k: z[k] for k in _KEYS}
+            total += d["board"].shape[0]
+            self.shards.append(d)
+            self._cum.append(total)
+        self.n = total
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
+        s = bisect.bisect_right(self._cum, i)
+        base = self._cum[s - 1] if s > 0 else 0
+        d = self.shards[s]
+        row = i - base
         out = {}
         for k in _KEYS:
-            val = self.data[k][i]
+            val = d[k][row]
             if k in ("board", "history", "temporal"):
                 out[k] = torch.from_numpy(np.ascontiguousarray(val)).float()
             elif k == "think_time":
