@@ -95,34 +95,49 @@ Raw "seconds left" is the weakest use of time. Higher-signal ideas, folded into 
 
 ## Section 2 — Model architecture
 
-Backbone = **Chessformer 5M, unchanged**. We add three things around it.
+**Decision (2026-08-11):** after reading Maia-3's actual source (`maia3/model_registry.py`,
+`models.py`, `dataset.py`), we build the backbone **faithful to their real 5M architecture**,
+and keep **only the time layer as ours**. (Their code already ships basic time inputs +
+a scalar "ponder" head; our time handling is deliberately richer and different.) We reimplement
+from understanding — their code is **AGPL-3.0**, so no verbatim porting.
 
-**Two conditioning signals:**
-1. **Skill/pace embedding** (unchanged): both players' Elo → interpolated 128-dim
-   embeddings. Owns the baseline pace / "time personality."
-2. **Temporal context vector `t`** (new): the Section-1 temporal block → small MLP → ~128-dim.
+### Faithful Maia-3 5M backbone (their exact config)
 
-**How time modulates the network (FiLM + GAB — the chosen approach):**
-- **Time-conditioned GAB**: concatenate `t` (and the skill embedding) into GAB's compression
-  input, so the **geometric attention itself becomes clock-aware** — under time pressure the
-  net can narrow attention onto forcing moves/captures; in calm positions it spreads out.
-  *This is the core idea: time reshapes how the board is read.*
-- **FiLM on encoder blocks**: `t` → generator → per-layer **(γ, β)** scaling/shifting each
-  transformer block's activations. A cheap second knob for reprocessing under time pressure.
+From `model_registry.py` BASE + 5M spec:
+- **Input**: 64 tokens. Each token's channels = `12 × history(8) + 2 × dim_emb(128)` = **352**:
+  the 12-plane board for the current + 7 past positions (earliest repeated if missing),
+  **concatenated with** the two interpolated skill embeddings (self + opponent), one 128-vec
+  each, broadcast to every square. Then `Linear(352 → dim_vit=256)`.
+- **`use_absolute_pe = False`** — GAB is the only positional signal.
+- **Trunk**: `num_blocks=8`, `dim_vit=256`, `num_heads=8`, `mlp_ratio=2` (FFN 512),
+  **RMSNorm, post-norm**, GELU, `omit_qkv_biases=True`, dropout 0.
+- **GAB, per-layer, inside each attention block** (5M variant, `gab_per_square_dim=0` → avg-pool):
+  mean-pool the layer's 64 tokens → `Linear(256→64)`+GELU+LN → `Linear(64→heads·64)`+GELU+LN →
+  reshape `(B, heads, gab_gen_size=64)` → a **shared-across-layers** `gab_weight (4096, 64)`
+  einsum → `(B, heads, 64, 64)` added to that layer's attention logits.
+- **Skill interpolation**: `e_k = γ·e_weak + (1−γ)·e_strong`, `γ = (5000−k)/5000`, dim_emb 128.
+- **Policy head**: `proj_from`, `proj_to` = `Linear(256 → head_hid_dim=256, bias=False)`;
+  bilinear `einsum/√256 → (B,64,64)` → 4096 move logits, **plus 256 promotion logits**
+  (8 files × 8 target files × 4 pieces) = **4352 total**.
+- **Value head**: norm → mean-pool → `Linear(256→256)`+ReLU → `Linear(256→3)` (W/D/L).
 
-**Three heads:**
-1. **Policy** (unchanged): source→destination 64×64 attention + promotion bias.
-2. **Value** (unchanged): mean-pool → W/D/L.
-3. **Think-time head** (new): mean-pool encoder output (+ `t`, + skill embedding) → MLP →
-   **Mixture Density Network** outputting the parameters of a mixture of **log-normals** (e.g.
-   M=3 components → mixture weights `π`, means `μ`, spreads `σ` in log-time space). This gives
-   a **continuous, multimodal, samplable** think-time distribution — it can represent "60%
-   premove ~0.05s, 40% real think ~4s" instead of collapsing to a meaningless mean. Predicting
-   in **log-time** space naturally handles the heavy tail; the premove spike becomes one
-   low-mean component.
+The clock-blind version of this (no time layer) is the **ablation baseline**.
 
-New parameters are only: temporal MLP, FiLM generator, time head. Conditioning stays faithful
-to Maia-3.
+### Our time layer (kept different — this is the contribution)
+
+1. **Temporal context** `t`: the Section-1 21-dim block → `TemporalEncoder` MLP → 128-dim.
+   (Richer than their 4 raw scalars.)
+2. **Time-conditioned GAB**: concatenate `t` into each layer's GAB generator input, so the
+   geometric attention becomes clock-aware — under pressure it can narrow onto forcing moves.
+3. **FiLM** on each block: `t` → per-layer per-channel `(γ, β)`, near-identity at init.
+4. **MDN think-time head** (replaces their scalar ponder head): mean-pool (+ `t`) → MLP →
+   parameters of a mixture of **log-normals** (M=3: weights `π`, means `μ`, spreads `σ` in
+   log-time space). Continuous, multimodal, samplable — represents "60% premove ~0.05s,
+   40% real think ~4s" instead of collapsing to a meaningless mean.
+5. We **train on time-pressure positions** (Maia-3 discards them).
+
+New parameters vs. their backbone: temporal MLP, per-layer time-conditioning of GAB, FiLM
+generator, and the MDN head.
 
 ---
 

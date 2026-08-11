@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED by `2026-08-11-time-modulation-v2.md`** (2026-08-11). Rebuilt on the faithful Maia-3 backbone. This plan is historical.
+
 # Time Modulation: FiLM + Time-Conditioned GAB (Plan 3 of 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

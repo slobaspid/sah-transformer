@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED by `2026-08-11-model-backbone-v2-faithful.md`** (2026-08-11). After reading Maia-3's actual source we rebuilt the backbone faithful to their real 5M config. This plan (and the code it produced) is historical.
+
 # Model Backbone + Heads Implementation Plan (Plan 2 of 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
