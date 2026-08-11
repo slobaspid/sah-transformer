@@ -70,7 +70,8 @@ From the Chessformer paper (ICLR 2026) and the CSSLab/maia3 repo:
       the net can represent nonlinear panic thresholds
     - burn rate (how fast each side spends time)
 - **Targets per position:** (a) move played, (b) game result W/D/L, (c) **this move's
-  think-time** (as a log-spaced bucket).
+  think-time** stored as a **raw float (seconds)** — the MDN head consumes it directly in
+  log-space; no bucketing.
 - **Key difference from Maia-3**: we **KEEP** time-pressure and flag-scramble positions —
   that's the whole point.
 - **Balancing**: equalize 22 Elo bins (Maia-3 style). Start ~1M positions for a Colab run.
@@ -113,8 +114,12 @@ Backbone = **Chessformer 5M, unchanged**. We add three things around it.
 1. **Policy** (unchanged): source→destination 64×64 attention + promotion bias.
 2. **Value** (unchanged): mean-pool → W/D/L.
 3. **Think-time head** (new): mean-pool encoder output (+ `t`, + skill embedding) → MLP →
-   **classification over ~16 log-spaced buckets** (premove/<0.1s … >30s). Buckets handle the
-   heavy tail + premove spike and give a full distribution to sample from when simulating.
+   **Mixture Density Network** outputting the parameters of a mixture of **log-normals** (e.g.
+   M=3 components → mixture weights `π`, means `μ`, spreads `σ` in log-time space). This gives
+   a **continuous, multimodal, samplable** think-time distribution — it can represent "60%
+   premove ~0.05s, 40% real think ~4s" instead of collapsing to a meaningless mean. Predicting
+   in **log-time** space naturally handles the heavy tail; the premove spike becomes one
+   low-mean component.
 
 New parameters are only: temporal MLP, FiLM generator, time head. Conditioning stays faithful
 to Maia-3.
@@ -126,8 +131,10 @@ to Maia-3.
 **Combined loss:**
 - **Policy** — cross-entropy on move, weight **1.0** (main objective).
 - **Value** — cross-entropy on W/D/L, weight **~0.1** (Maia-3 default).
-- **Think-time** — cross-entropy over log-spaced buckets, weight **~0.2–0.3** (tuned: high
-  enough to learn time, low enough not to hurt move accuracy).
+- **Think-time** — **negative log-likelihood** of the observed think-time under the predicted
+  log-normal mixture (MDN loss), weight **~0.2–0.3** (tuned: high enough to learn time, low
+  enough not to hurt move accuracy). Numerical stability: compute NLL in log-space with a
+  log-sum-exp over components; floor `σ` with a softplus + epsilon.
 
 Move-accuracy is watched as a guard metric; if the time loss tanks it vs. baseline, turn the
 weight down.
@@ -170,6 +177,6 @@ If stage 4 gets finicky, stages 2/3 still yield a publishable clock-aware model.
 
 ## Open questions / to settle during planning
 
-- Exact k for the think-time window, exact bucket edges, and normalization constants.
+- Exact k for the think-time window, number of MDN components M, and normalization constants.
 - Whether to reimplement Chessformer from scratch or adapt CSSLab/maia3's open model code.
 - Precise Lichess month(s) to download and target dataset size vs. Colab epoch time.
