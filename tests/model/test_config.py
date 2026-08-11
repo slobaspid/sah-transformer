@@ -15,3 +15,8 @@ def test_defaults_match_5m_class():
 def test_head_dim_derived():
     c = ModelConfig()
     assert c.head_dim == 32
+
+def test_modulation_dims():
+    c = ModelConfig()
+    assert c.t_ctx == 128
+    assert c.gab_rank == 4
