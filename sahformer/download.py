@@ -26,15 +26,27 @@ def iter_games_from_text(text: str):
             return
         yield game
 
-def iter_games_from_zst(path: str):
-    """Stream games from a Lichess .pgn.zst file without full decompression."""
+def _iter_games_from_binary(reader):
+    """Decompress a zstd binary stream (file-like with .read) and yield games."""
     import zstandard as zstd
+    dctx = zstd.ZstdDecompressor()
+    with dctx.stream_reader(reader) as decompressed:
+        text_stream = io.TextIOWrapper(decompressed, encoding="utf-8")
+        while True:
+            game = chess.pgn.read_game(text_stream)
+            if game is None:
+                return
+            yield game
+
+def iter_games_from_zst(path: str):
+    """Stream games from a local Lichess .pgn.zst file."""
     with open(path, "rb") as fh:
-        dctx = zstd.ZstdDecompressor()
-        with dctx.stream_reader(fh) as reader:
-            text_stream = io.TextIOWrapper(reader, encoding="utf-8")
-            while True:
-                game = chess.pgn.read_game(text_stream)
-                if game is None:
-                    return
-                yield game
+        yield from _iter_games_from_binary(fh)
+
+def stream_games_from_url(url: str):
+    """Stream games directly from a Lichess .pgn.zst URL, decompressing on the fly.
+    The consumer should early-stop; only the first chunk of the archive is transferred."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "sahformer/0.1"})
+    with urllib.request.urlopen(req) as resp:
+        yield from _iter_games_from_binary(resp)
