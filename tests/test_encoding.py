@@ -35,3 +35,28 @@ def test_encode_move_promotion():
     move = chess.Move.from_uci("a7a8q")
     frm, to, promo = encode_move(board, move)
     assert promo == 4  # queen
+
+from sahformer.encoding import build_temporal, TEMPORAL_DIM
+
+def test_temporal_shape_and_clocks():
+    v = build_temporal(my_clock=90.0, opp_clock=120.0,
+                        own_think_history=[2.0, 0.05, 5.0], ply=10)
+    assert v.shape == (TEMPORAL_DIM,)
+    assert v.dtype == np.float32
+    assert abs(v[0] - 90.0 / 180.0) < 1e-6      # my_clock/180
+    assert abs(v[1] - 120.0 / 180.0) < 1e-6     # opp_clock/180
+    assert abs(v[2] - (90.0 - 120.0) / 180.0) < 1e-6
+
+def test_temporal_premove_flag():
+    # most-recent think-time first: 0.05s is a premove
+    v = build_temporal(my_clock=10.0, opp_clock=10.0,
+                        own_think_history=[0.05, 4.0], ply=20)
+    assert v[10] == 1.0   # last move was a premove
+    assert v[11] == 0.0   # the one before was not
+
+def test_temporal_pressure_buckets():
+    v = build_temporal(my_clock=1.5, opp_clock=40.0, own_think_history=[], ply=30)
+    assert v[15] == 1.0   # <2s
+    assert v[16] == 1.0   # <5s
+    assert v[17] == 1.0   # <10s
+    assert v[18] == 0.0   # >30s is about my_clock, which is 1.5
