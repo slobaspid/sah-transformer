@@ -1,8 +1,9 @@
 from sahformer.model.config import ModelConfig
 from sahformer.model.chessformer import FaithfulChessformer
 from sahformer.model.clockaware import ClockAwareChessformer
+from sahformer.model.ponder import PonderChessformer
 
-MODES = ("baseline", "film_only", "gab_only", "full")
+MODES = ("baseline", "film_only", "gab_only", "full", "ponder")
 
 def build_model(mode: str, cfg: ModelConfig):
     """Return the model for an ablation mode (see the design's ablation table)."""
@@ -14,4 +15,6 @@ def build_model(mode: str, cfg: ModelConfig):
         return ClockAwareChessformer(cfg, use_film=False, use_time_gab=True)
     if mode == "full":
         return ClockAwareChessformer(cfg, use_film=True, use_time_gab=True)
+    if mode == "ponder":
+        return PonderChessformer(cfg)
     raise ValueError(f"unknown mode: {mode!r} (expected one of {MODES})")

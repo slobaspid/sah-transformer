@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from sahformer.model.config import ModelConfig
 from sahformer.dataset import ShardDataset, StreamingShardDataset
 from sahformer.training.build import build_model
-from sahformer.training.losses import compute_losses
+from sahformer.training.losses import compute_losses, ponder_loss
 
 @dataclass
 class TrainConfig:
@@ -108,8 +108,17 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
                  for k, v in batch.items()}
         opt.zero_grad(set_to_none=True)
         with torch.autocast(device_type=dev_type, enabled=cfg.amp):
-            out = model(batch)
-            losses = compute_losses(out, batch, cfg.w_policy, cfg.w_value, cfg.w_time)
+            if cfg.mode == "ponder":
+                pt = model.ponder_train(batch)
+                losses = ponder_loss(pt, batch, model_cfg.ponder_prior, 0.01,
+                                     cfg.w_policy, cfg.w_value, cfg.w_time)
+                losses.setdefault("policy", losses["task"])
+                losses.setdefault("value", losses["kl"])
+                losses.setdefault("time", torch.tensor(losses["avg_steps"]))
+                losses.setdefault("move_acc", 0.0)
+            else:
+                out = model(batch)
+                losses = compute_losses(out, batch, cfg.w_policy, cfg.w_value, cfg.w_time)
         scaler.scale(losses["total"]).backward()
         scaler.step(opt)
         scaler.update()
