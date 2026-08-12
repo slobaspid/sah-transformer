@@ -71,3 +71,21 @@ def self_play(model, max_plies=200, elo=1500, temperature=1.0,
         plane_hist.append(cur)
         board.push(move)
         ply += 1
+
+def selfplay_frames(model, max_plies=120, elo=1500, temperature=1.0,
+                    start_clock=180.0, seed=0, size=400):
+    """Play one self-play game and return (svg_frames, captions) for a viewer.
+    frames[0] is the start position; each later frame is the board after a move."""
+    import chess.svg
+    board = chess.Board()
+    frames = [chess.svg.board(board, size=size)]
+    caps = [{"san": "", "think": 0.0, "white": float(start_clock),
+             "black": float(start_clock), "mover": ""}]
+    for rec in self_play(model, max_plies=max_plies, elo=elo, temperature=temperature,
+                         start_clock=start_clock, device="cpu", seed=seed):
+        board.push(rec["move"])
+        frames.append(chess.svg.board(board, size=size, lastmove=rec["move"]))
+        caps.append({"san": rec["san"], "think": rec["think"],
+                     "white": rec["white_clock"], "black": rec["black_clock"],
+                     "mover": rec["mover"]})
+    return frames, caps
