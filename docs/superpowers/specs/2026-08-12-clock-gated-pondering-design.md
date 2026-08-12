@@ -22,10 +22,29 @@ Two different kinds of thinking (see the research thread):
   representation (internal, trained into the model).
 
 They stack: a pondering model is a *deeper brain*, and the search evaluates positions with that
-deeper brain. Grounded in adaptive-computation research — **ACT** (Graves 2016), **PonderNet**
-(Banino 2021), and the 2025–26 looped/recurrent-depth line (Ouro's confidence-based early exit,
-etc.). We use the **PonderNet** formulation: a per-step halting probability, a probability-weighted
-loss over steps, and a geometric prior that stops the halting from degenerating.
+deeper brain.
+
+### Research grounding (verified)
+
+- **Adaptive Computation Time** (Graves, 2016, arXiv 1603.08983) — the original "variable number
+  of internal steps + learned halting" idea for RNNs.
+- **PonderNet** (Banino, Balaguer, Blundell, 2021, arXiv 2107.05407) — the exact formulation we
+  use. Its loss is `L = Σ_n p_n · L(y, ŷ_n) + β · KL(p_n ‖ p_G(λ_p))`: a halt-probability-weighted
+  per-step task loss plus a KL term pulling the halting distribution toward a **geometric prior**
+  `p_G(λ_p)` truncated at N. Our `ponder_loss` and the halting `p_n = λ_n·Π_{m<n}(1−λ_m)` match this
+  paper directly. The prior biases the **expected number of steps toward `1/λ_p`** (so our default
+  `ponder_prior = 0.4` ⇒ ~2.5 steps) and is the guardrail against halting collapse.
+- **Conditional / input-adaptive computation** (early-exit-when-confident, Adaptive Computation
+  Modules, Ouro's entropy-based early exit, looped/recurrent-depth transformers, 2023–26) — the
+  broad, active field that says: spend more compute on hard inputs, less on easy ones. Standard.
+- **The novel twist is ours:** the field conditions compute on **input difficulty**; we also
+  condition it on an **external context signal — the remaining clock** (feed `t` into the halt
+  gate + a clock step-cap at inference). Each ingredient is well-established; the combination
+  (PonderNet halting + clock-gating + human-imitation chess) is new — which is a good place to be.
+- **Known risk (from the literature):** looped/pondering models are finicky to train — halting can
+  collapse to always-1 or always-K, and recent work ("readout blind spot" in looped LMs) flags
+  training subtleties. The KL prior + small `max_ponder` are the standard mitigations, which this
+  design uses.
 
 ## Architecture
 
