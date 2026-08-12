@@ -14,6 +14,8 @@ class ModelConfig:
     head_hid_dim: int = 256
     mdn_components: int = 3
     think_extra: int = 2          # difficulty features (policy entropy + top-move prob) into the time head
+    max_ponder: int = 4           # max adaptive-computation (ponder) steps
+    ponder_prior: float = 0.4     # geometric-prior halting rate for PonderNet
     n_squares: int = 64
     temporal_dim: int = 21        # Plan 3
     t_ctx: int = 128              # Plan 3

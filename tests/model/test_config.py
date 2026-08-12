@@ -16,3 +16,8 @@ def test_faithful_dims():
     assert c.head_hid_dim == 256
     assert c.mdn_components == 3
     assert c.n_squares == 64
+
+def test_ponder_defaults():
+    c = ModelConfig()
+    assert c.max_ponder == 4
+    assert abs(c.ponder_prior - 0.4) < 1e-9
