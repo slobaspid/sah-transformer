@@ -14,6 +14,7 @@ import sys
 # make the project importable when the GUI launches this file directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import time
 import numpy as np
 import chess
 import torch
@@ -24,6 +25,7 @@ from sahformer.training.loop import load_checkpoint
 from sahformer.encoding import encode_board, encode_move, build_temporal
 from sahformer.records import _stack_history
 from sahformer.model.heads import move_to_index
+from sahformer.play import _sample_think_time
 
 def _find_ckpt():
     # 1) explicit: --ckpt PATH, or any .pt argument
@@ -56,7 +58,7 @@ def main():
         sys.stderr.flush()
     model.eval()
     rng = np.random.default_rng()
-    opts = {"elo": 1500, "temperature": 0.3}
+    opts = {"elo": 1500, "temperature": 0.3, "pace": 0.0}
     moves = []
     start_fen = chess.STARTING_FEN
 
@@ -84,16 +86,23 @@ def main():
             "temporal": torch.from_numpy(temporal).float().unsqueeze(0),
         }
         with torch.no_grad():
-            logits = model(batch)["move_logits"][0]
+            out = model(batch)
+        logits = out["move_logits"][0]
         legal = list(b.legal_moves)
         idxs = [move_to_index(*encode_move(b, m)) for m in legal]
         scores = logits[idxs]
         t = opts["temperature"]
         if t <= 1e-6:
-            return legal[int(scores.argmax().item())]
-        probs = F.softmax(scores / t, dim=-1).cpu().numpy()
-        probs = probs / probs.sum()
-        return legal[int(rng.choice(len(legal), p=probs))]
+            move = legal[int(scores.argmax().item())]
+        else:
+            probs = F.softmax(scores / t, dim=-1).cpu().numpy()
+            probs = probs / probs.sum()
+            move = legal[int(rng.choice(len(legal), p=probs))]
+        # optionally play at human tempo: pause by the predicted think-time
+        if opts["pace"] > 0:
+            think = _sample_think_time(out["mdn"], rng, think_temp=0.3)
+            time.sleep(min(think / opts["pace"], 8.0))
+        return move
 
     def emit(s):
         sys.stdout.write(s + "\n")
@@ -106,6 +115,7 @@ def main():
             emit("id author sahformer")
             emit("option name UCI_Elo type spin default 1500 min 600 max 2800")
             emit("option name Temperature type string default 0.3")
+            emit("option name Pace type string default 0")
             emit("uciok")
         elif line == "isready":
             emit("readyok")
@@ -119,6 +129,8 @@ def main():
                         opts["elo"] = int(float(val))
                     elif name == "temperature":
                         opts["temperature"] = float(val)
+                    elif name == "pace":
+                        opts["pace"] = float(val)
                 except ValueError:
                     pass
         elif line == "ucinewgame":
