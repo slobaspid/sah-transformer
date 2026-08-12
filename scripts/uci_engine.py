@@ -63,20 +63,22 @@ def main():
         sys.stderr.flush()
         model = build_model("full", ModelConfig())
     model.eval()
-    def _initial_pace():
+    def _initial(flag, env, default):
         for i, a in enumerate(sys.argv):
-            if a == "--pace" and i + 1 < len(sys.argv):
+            if a == flag and i + 1 < len(sys.argv):
                 try:
                     return float(sys.argv[i + 1])
                 except ValueError:
-                    return 0.0
+                    return default
         try:
-            return float(os.environ.get("SAHFORMER_PACE", "0"))
+            return float(os.environ.get(env, default))
         except ValueError:
-            return 0.0
+            return default
 
     rng = np.random.default_rng()
-    opts = {"elo": 1500, "temperature": 0.3, "pace": _initial_pace()}
+    opts = {"elo": 1500, "temperature": 0.3,
+            "pace": _initial("--pace", "SAHFORMER_PACE", 0.0),
+            "think_temp": _initial("--think-temp", "SAHFORMER_THINK_TEMP", 0.7)}
     moves = []
     start_fen = chess.STARTING_FEN
 
@@ -118,8 +120,10 @@ def main():
             move = legal[int(rng.choice(len(legal), p=probs))]
         # optionally play at human tempo: pause by the predicted think-time
         if opts["pace"] > 0:
-            think = _sample_think_time(out["mdn"], rng, think_temp=0.3)
-            time.sleep(min(think / opts["pace"], 8.0))
+            think = _sample_think_time(out["mdn"], rng, think_temp=opts["think_temp"])
+            # allow the occasional big think, but never blow more than ~40% of the clock on one move
+            sleep = min(think / opts["pace"], 30.0, max(0.3, my * 0.4))
+            time.sleep(sleep)
         return move
 
     def emit(s):
@@ -134,6 +138,7 @@ def main():
             emit("option name UCI_Elo type spin default 1500 min 600 max 2800")
             emit("option name Temperature type string default 0.3")
             emit("option name Pace type string default 0")
+            emit("option name ThinkTemp type string default 0.7")
             emit("uciok")
         elif line == "isready":
             emit("readyok")
@@ -149,6 +154,8 @@ def main():
                         opts["temperature"] = float(val)
                     elif name == "pace":
                         opts["pace"] = float(val)
+                    elif name == "thinktemp":
+                        opts["think_temp"] = float(val)
                 except ValueError:
                     pass
         elif line == "ucinewgame":
