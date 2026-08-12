@@ -1,0 +1,5 @@
+@echo off
+REM Copy this to sahformer_engine.bat and set the path to your best.pt.
+REM Then add sahformer_engine.bat as a UCI engine in your chess GUI.
+set "SAHFORMER_CKPT=C:\path\to\your\best.pt"
+"%~dp0.venv\Scripts\python.exe" "%~dp0scripts\uci_engine.py"

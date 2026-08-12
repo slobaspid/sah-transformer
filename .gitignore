@@ -8,3 +8,5 @@ data/
 .pytest_cache/
 checkpoints/
 .claude/settings.local.json
+sahformer_engine.bat
+selfplay*.html
