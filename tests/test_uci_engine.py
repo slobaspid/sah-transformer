@@ -7,6 +7,17 @@ def _load(name, path):
     spec.loader.exec_module(mod)
     return mod
 
+def test_uci_search_option_plays_legal(monkeypatch, capsys):
+    mod = _load("uci_engine", "scripts/uci_engine.py")
+    cmds = ("uci\nisready\nsetoption name Search value 8\n"
+            "position startpos moves e2e4 e7e5\ngo wtime 60000 btime 60000\nquit\n")
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(cmds))
+    mod.main()
+    out = capsys.readouterr().out
+    assert "option name Search" in out
+    bm = [l for l in out.splitlines() if l.startswith("bestmove ")]
+    assert bm and len(bm[0].split()[1]) >= 4
+
 def test_uci_protocol_and_move(monkeypatch, capsys):
     mod = _load("uci_engine", "scripts/uci_engine.py")
     cmds = ("uci\nisready\nsetoption name UCI_Elo value 1800\n"

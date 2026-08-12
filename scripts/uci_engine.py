@@ -26,6 +26,7 @@ from sahformer.encoding import encode_board, encode_move, build_temporal
 from sahformer.records import _stack_history
 from sahformer.model.heads import move_to_index
 from sahformer.play import _sample_think_time
+from sahformer.search import SearchConfig, time_to_sims, mcts_move
 
 def _find_ckpt():
     # 1) explicit: --ckpt PATH, or any .pt argument
@@ -78,7 +79,8 @@ def main():
     rng = np.random.default_rng()
     opts = {"elo": 1500, "temperature": 0.3,
             "pace": _initial("--pace", "SAHFORMER_PACE", 0.0),
-            "think_temp": _initial("--think-temp", "SAHFORMER_THINK_TEMP", 0.7)}
+            "think_temp": _initial("--think-temp", "SAHFORMER_THINK_TEMP", 0.7),
+            "search": _initial("--search", "SAHFORMER_SEARCH", 0.0)}
     moves = []
     start_fen = chess.STARTING_FEN
 
@@ -110,14 +112,23 @@ def main():
         logits = out["move_logits"][0]
         legal = list(b.legal_moves)
         idxs = [move_to_index(*encode_move(b, m)) for m in legal]
-        scores = logits[idxs]
-        t = opts["temperature"]
-        if t <= 1e-6:
-            move = legal[int(scores.argmax().item())]
+        if opts["search"] > 0:
+            scfg = SearchConfig(elo=opts["elo"], temperature=opts["temperature"],
+                                max_sims=int(opts["search"]))
+            think = _sample_think_time(out["mdn"], rng, think_temp=0.5)
+            sims = time_to_sims(think, scfg)
+            move, _ = mcts_move(model, b, plane_hist, sims, scfg,
+                                my_clock=my, opp_clock=opp, ply=len(moves), device="cpu",
+                                seed=int(rng.integers(1 << 30)))
         else:
-            probs = F.softmax(scores / t, dim=-1).cpu().numpy()
-            probs = probs / probs.sum()
-            move = legal[int(rng.choice(len(legal), p=probs))]
+            scores = logits[idxs]
+            t = opts["temperature"]
+            if t <= 1e-6:
+                move = legal[int(scores.argmax().item())]
+            else:
+                probs = F.softmax(scores / t, dim=-1).cpu().numpy()
+                probs = probs / probs.sum()
+                move = legal[int(rng.choice(len(legal), p=probs))]
         # optionally play at human tempo: pause by the predicted think-time
         if opts["pace"] > 0:
             think = _sample_think_time(out["mdn"], rng, think_temp=opts["think_temp"])
@@ -139,6 +150,7 @@ def main():
             emit("option name Temperature type string default 0.3")
             emit("option name Pace type string default 0")
             emit("option name ThinkTemp type string default 0.7")
+            emit("option name Search type string default 0")
             emit("uciok")
         elif line == "isready":
             emit("readyok")
@@ -156,6 +168,8 @@ def main():
                         opts["pace"] = float(val)
                     elif name == "thinktemp":
                         opts["think_temp"] = float(val)
+                    elif name == "search":
+                        opts["search"] = float(val)
                 except ValueError:
                     pass
         elif line == "ucinewgame":
