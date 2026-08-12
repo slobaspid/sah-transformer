@@ -57,8 +57,20 @@ def main():
         sys.stderr.write("WARNING: SAHFORMER_CKPT not set or missing — playing untrained!\n")
         sys.stderr.flush()
     model.eval()
+    def _initial_pace():
+        for i, a in enumerate(sys.argv):
+            if a == "--pace" and i + 1 < len(sys.argv):
+                try:
+                    return float(sys.argv[i + 1])
+                except ValueError:
+                    return 0.0
+        try:
+            return float(os.environ.get("SAHFORMER_PACE", "0"))
+        except ValueError:
+            return 0.0
+
     rng = np.random.default_rng()
-    opts = {"elo": 1500, "temperature": 0.3, "pace": 0.0}
+    opts = {"elo": 1500, "temperature": 0.3, "pace": _initial_pace()}
     moves = []
     start_fen = chess.STARTING_FEN
 
