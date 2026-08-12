@@ -9,17 +9,24 @@ def _batch(b=2, fill=0.5):
             "temporal": torch.full((b, 21), fill)}
 
 def test_modes_list():
-    assert MODES == ("baseline", "film_only", "gab_only", "full")
+    assert MODES == ("baseline", "film_only", "gab_only", "full", "ponder")
 
-def test_all_modes_build_forward_backward():
+def test_gradient_modes_build_forward_backward():
+    # the ponder model trains via ponder_train (its forward is inference-only), so exclude it here
     c = ModelConfig()
-    for m in MODES:
+    for m in ("baseline", "film_only", "gab_only", "full"):
         model = build_model(m, c)
         out = model(_batch(2))
         assert out["move_logits"].shape == (2, 4352)
         assert out["value_logits"].shape == (2, 3)
         assert out["mdn"][0].shape == (2, c.mdn_components)
         out["move_logits"].sum().backward()
+
+def test_ponder_mode_forward_is_dropin():
+    out = build_model("ponder", ModelConfig())(_batch(2))
+    assert out["move_logits"].shape == (2, 4352)
+    assert out["value_logits"].shape == (2, 3)
+    assert out["mdn"][0].shape == (2, ModelConfig().mdn_components)
 
 def test_baseline_has_no_temporal_params():
     names = [n for n, _ in build_model("baseline", ModelConfig()).named_parameters()]
