@@ -42,3 +42,21 @@ def test_checkpoint_roundtrip(tmp_path):
     load_checkpoint(str(tmp_path / "ck" / "last.pt"), fresh)
     for (_, p1), (_, p2) in zip(res["model"].named_parameters(), fresh.named_parameters()):
         assert torch.allclose(p1.detach().cpu(), p2.detach().cpu())
+
+def test_checkpoint_saves_optimizer_state(tmp_path):
+    cfg = TrainConfig(mode="baseline", max_steps=6, warmup_steps=1, batch_size=2,
+                      out_dir=str(tmp_path / "ck"))
+    train(cfg, _shard(tmp_path))
+    ck = torch.load(str(tmp_path / "ck" / "last.pt"), map_location="cpu", weights_only=False)
+    assert ck.get("opt_state") is not None            # optimizer state is saved for resuming
+
+def test_resume_continues_from_saved_step(tmp_path):
+    shards = _shard(tmp_path)
+    train(TrainConfig(mode="baseline", max_steps=5, warmup_steps=1, batch_size=2,
+                      out_dir=str(tmp_path / "ck")), shards)
+    # resume toward a higher TOTAL step count, writing to a fresh dir
+    res = train(TrainConfig(mode="baseline", max_steps=9, warmup_steps=1, batch_size=2,
+                            out_dir=str(tmp_path / "ck2"),
+                            resume=str(tmp_path / "ck" / "last.pt")), shards)
+    assert res["history"][0]["step"] == 5             # continued, not restarted from 0
+    assert res["history"][-1]["step"] == 8

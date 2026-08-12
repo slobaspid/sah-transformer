@@ -21,6 +21,7 @@ class TrainConfig:
     w_time: float = 0.2
     amp: bool = False
     stream: bool = False          # True: stream shards from disk (for datasets too big for RAM)
+    resume: str = ""              # path to a checkpoint to continue training from
     device: str = "cpu"
     seed: int = 0
     out_dir: str = "checkpoints"
@@ -33,9 +34,10 @@ def _lr_scale(step, warmup, total):
     prog = (step - warmup) / max(1, total - warmup)
     return 0.5 * (1.0 + math.cos(math.pi * min(1.0, prog)))
 
-def save_checkpoint(path, model, cfg, step, best_metric, model_cfg=None):
+def save_checkpoint(path, model, cfg, step, best_metric, model_cfg=None, opt_state=None):
     torch.save({"model_state": model.state_dict(), "cfg": asdict(cfg),
                 "model_cfg": asdict(model_cfg) if model_cfg is not None else None,
+                "opt_state": opt_state,
                 "step": step, "best_metric": best_metric}, path)
 
 def load_checkpoint(path, model):
@@ -64,25 +66,43 @@ def _infinite(loader):
 def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
     torch.manual_seed(cfg.seed)
     os.makedirs(cfg.out_dir, exist_ok=True)
+
+    # resume: read the checkpoint first so we rebuild the same-sized model
+    resume_ckpt = None
+    if cfg.resume and os.path.exists(cfg.resume):
+        resume_ckpt = torch.load(cfg.resume, map_location="cpu", weights_only=False)
+        if resume_ckpt.get("model_cfg"):
+            model_cfg = ModelConfig(**resume_ckpt["model_cfg"])
+
     model_cfg = model_cfg or ModelConfig()
     model = build_model(cfg.mode, model_cfg).to(cfg.device)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    sched = torch.optim.lr_scheduler.LambdaLR(
-        opt, lambda s: _lr_scale(s, cfg.warmup_steps, cfg.max_steps))
     dev_type = "cuda" if "cuda" in cfg.device else "cpu"
     scaler = torch.amp.GradScaler(dev_type, enabled=cfg.amp)
 
+    start_step = 0
+    best = float("inf")
+    if resume_ckpt is not None:
+        model.load_state_dict(resume_ckpt["model_state"])
+        if resume_ckpt.get("opt_state") is not None:
+            opt.load_state_dict(resume_ckpt["opt_state"])
+        start_step = int(resume_ckpt.get("step", -1)) + 1
+        best = float(resume_ckpt.get("best_metric", float("inf")))
+        print(f"resumed from {cfg.resume} at step {start_step}")
+
     if cfg.stream:
-        ds = StreamingShardDataset(shard_paths, shuffle=True, seed=cfg.seed)
+        ds = StreamingShardDataset(shard_paths, shuffle=True, seed=cfg.seed + start_step)
         loader = DataLoader(ds, batch_size=cfg.batch_size, drop_last=False)
     else:
         loader = DataLoader(ShardDataset(shard_paths), batch_size=cfg.batch_size,
                             shuffle=True, drop_last=False)
     data = _infinite(loader)
     model.train()
-    best = float("inf")
     history = []
-    for step in range(cfg.max_steps):
+    for step in range(start_step, cfg.max_steps):
+        lr = cfg.lr * _lr_scale(step, cfg.warmup_steps, cfg.max_steps)
+        for g in opt.param_groups:
+            g["lr"] = lr
         batch = next(data)
         batch = {k: (v.to(cfg.device) if torch.is_tensor(v) else v)
                  for k, v in batch.items()}
@@ -93,10 +113,9 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
         scaler.scale(losses["total"]).backward()
         scaler.step(opt)
         scaler.update()
-        sched.step()
 
         total = losses["total"].item()
-        rec = {"step": step, "lr": sched.get_last_lr()[0], "total": total,
+        rec = {"step": step, "lr": lr, "total": total,
                "policy": losses["policy"].item(), "value": losses["value"].item(),
                "time": losses["time"].item(), "move_acc": losses["move_acc"]}
         history.append(rec)
@@ -106,11 +125,12 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
         if total < best:
             best = total
             save_checkpoint(os.path.join(cfg.out_dir, "best.pt"), model, cfg, step, best,
-                            model_cfg=model_cfg)
+                            model_cfg=model_cfg, opt_state=opt.state_dict())
         if (step + 1) % cfg.ckpt_every == 0:
             save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, step, best,
-                            model_cfg=model_cfg)
+                            model_cfg=model_cfg, opt_state=opt.state_dict())
 
-    save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, cfg.max_steps - 1, best,
-                    model_cfg=model_cfg)
+    last_step = max(start_step, cfg.max_steps) - 1
+    save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, last_step, best,
+                    model_cfg=model_cfg, opt_state=opt.state_dict())
     return {"history": history, "best": best, "model": model}

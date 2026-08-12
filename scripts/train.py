@@ -17,6 +17,8 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--out", default="checkpoints")
     ap.add_argument("--amp", action="store_true")
+    ap.add_argument("--stream", action="store_true", help="stream shards (huge datasets)")
+    ap.add_argument("--resume", default="", help="path to a checkpoint (last.pt) to continue from")
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args()
 
@@ -24,7 +26,8 @@ def main():
     if not paths:
         raise SystemExit(f"no shards matched: {args.shards}")
     cfg = TrainConfig(mode=args.mode, max_steps=args.max_steps, batch_size=args.batch_size,
-                      lr=args.lr, out_dir=args.out, amp=args.amp, device=args.device)
+                      lr=args.lr, out_dir=args.out, amp=args.amp, stream=args.stream,
+                      resume=args.resume, device=args.device)
     res = train(cfg, paths)
     print(f"done. best_total={res['best']:.4f} steps={len(res['history'])}")
 
