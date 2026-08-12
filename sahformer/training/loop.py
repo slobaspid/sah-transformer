@@ -22,6 +22,7 @@ class TrainConfig:
     amp: bool = False
     stream: bool = False          # True: stream shards from disk (for datasets too big for RAM)
     resume: str = ""              # path to a checkpoint to continue training from
+    ponder_beta: float = 0.01     # PonderNet KL weight (raise if halting collapses to 1 step)
     device: str = "cpu"
     seed: int = 0
     out_dir: str = "checkpoints"
@@ -110,7 +111,7 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
         with torch.autocast(device_type=dev_type, enabled=cfg.amp):
             if cfg.mode == "ponder":
                 pt = model.ponder_train(batch)
-                losses = ponder_loss(pt, batch, model_cfg.ponder_prior, 0.01,
+                losses = ponder_loss(pt, batch, model_cfg.ponder_prior, cfg.ponder_beta,
                                      cfg.w_policy, cfg.w_value, cfg.w_time)
                 losses.setdefault("policy", losses["task"])
                 losses.setdefault("value", losses["kl"])
