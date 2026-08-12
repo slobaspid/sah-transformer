@@ -12,21 +12,27 @@ def _softmax_np(x):
     e = np.exp(x)
     return e / e.sum()
 
-def _sample_think_time(mdn, rng):
-    """Sample a think-time (seconds) from the MDN mixture-of-log-normals output."""
+def _sample_think_time(mdn, rng, think_temp=1.0):
+    """Sample a think-time (seconds) from the MDN mixture-of-log-normals output.
+    think_temp scales the randomness: 1.0 = full human spread, lower = calmer (closer
+    to the typical time, fewer wild long-thinks), 0 = always the most-likely typical time."""
     pi_logits = mdn[0][0].detach().cpu().numpy()
     mu = mdn[1][0].detach().cpu().numpy()
     sigma_p = mdn[2][0].detach().cpu().numpy()
-    pi = _softmax_np(pi_logits)
-    k = int(rng.choice(len(pi), p=pi))
+    if think_temp <= 1e-6:
+        k = int(np.argmax(pi_logits))                     # most-likely component
+        z = 0.0
+    else:
+        pi = _softmax_np(pi_logits / think_temp)          # sharpen weights when calmer
+        k = int(rng.choice(len(pi), p=pi))
+        z = float(rng.standard_normal()) * think_temp     # shrink the spread when calmer
     sigma = float(np.logaddexp(0.0, sigma_p[k])) + 1e-3   # stable softplus
-    z = float(rng.standard_normal())
     t = math.exp(mu[k] + sigma * z)
     return float(min(max(t, 0.0), 180.0))
 
 @torch.no_grad()
 def self_play(model, max_plies=200, elo=1500, temperature=1.0,
-              start_clock=180.0, device="cpu", seed=0):
+              start_clock=180.0, device="cpu", seed=0, think_temp=1.0):
     """Model plays both sides. Yields one dict per ply (the move it's about to play,
     its sampled think-time, and both clocks). Ends on game over, ply cap, or a flag."""
     rng = np.random.default_rng(seed)
@@ -52,10 +58,14 @@ def self_play(model, max_plies=200, elo=1500, temperature=1.0,
         logits = out["move_logits"][0]
         legal = list(board.legal_moves)
         idxs = [move_to_index(*encode_move(board, m)) for m in legal]
-        probs = F.softmax(logits[idxs] / temperature, dim=-1).detach().cpu().numpy()
-        probs = probs / probs.sum()
-        move = legal[int(rng.choice(len(legal), p=probs))]
-        think = _sample_think_time(out["mdn"], rng)
+        scores = logits[idxs]
+        if temperature <= 1e-6:                          # temp 0 = always the top move
+            move = legal[int(scores.argmax().item())]
+        else:
+            probs = F.softmax(scores / temperature, dim=-1).detach().cpu().numpy()
+            probs = probs / probs.sum()
+            move = legal[int(rng.choice(len(legal), p=probs))]
+        think = _sample_think_time(out["mdn"], rng, think_temp=think_temp)
 
         clock[mover] -= think
         flagged = clock[mover] <= 0.0
@@ -73,7 +83,7 @@ def self_play(model, max_plies=200, elo=1500, temperature=1.0,
         ply += 1
 
 def selfplay_frames(model, max_plies=120, elo=1500, temperature=1.0,
-                    start_clock=180.0, seed=0, size=400):
+                    start_clock=180.0, seed=0, size=400, think_temp=1.0):
     """Play one self-play game and return (svg_frames, captions) for a viewer.
     frames[0] is the start position; each later frame is the board after a move."""
     import chess.svg
@@ -82,7 +92,8 @@ def selfplay_frames(model, max_plies=120, elo=1500, temperature=1.0,
     caps = [{"san": "", "think": 0.0, "white": float(start_clock),
              "black": float(start_clock), "mover": ""}]
     for rec in self_play(model, max_plies=max_plies, elo=elo, temperature=temperature,
-                         start_clock=start_clock, device="cpu", seed=seed):
+                         start_clock=start_clock, device="cpu", seed=seed,
+                         think_temp=think_temp):
         board.push(rec["move"])
         frames.append(chess.svg.board(board, size=size, lastmove=rec["move"]))
         caps.append({"san": rec["san"], "think": rec["think"],

@@ -69,6 +69,8 @@ def main():
     ap.add_argument("--speed", type=float, default=1.5, help="playback speed (1=real pace)")
     ap.add_argument("--elo", type=int, default=1500)
     ap.add_argument("--temperature", type=float, default=1.0)
+    ap.add_argument("--think-temp", type=float, default=0.25,
+                    help="timing randomness: 1=full human spread, lower=calmer, 0=typical only")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="selfplay.html")
     args = ap.parse_args()
@@ -76,7 +78,8 @@ def main():
     model = build_model("full", ModelConfig())
     load_checkpoint(args.ckpt, model)
     frames, caps = selfplay_frames(model, max_plies=args.plies, elo=args.elo,
-                                   temperature=args.temperature, seed=args.seed)
+                                   temperature=args.temperature, seed=args.seed,
+                                   think_temp=args.think_temp)
     html = _HTML.format(frames=json.dumps(frames), caps=json.dumps(caps), speed=args.speed)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
