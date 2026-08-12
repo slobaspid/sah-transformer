@@ -26,3 +26,18 @@ def test_ponder_loss_finite_and_backward():
     assert 1.0 <= out["avg_steps"] <= K
     out["total"].backward()
     assert steps[0]["move_logits"].grad is not None
+
+def test_ponder_floor_penalizes_collapse():
+    K = 4
+    steps = [_step(3) for _ in range(K)]
+    p = torch.tensor([[0.9, 0.05, 0.03, 0.02]] * 3)  # concentrated on step 0 -> ~1 avg step
+    hi = ponder_loss({"steps": steps, "p_halt": p}, _batch(3), min_steps=3.0, floor_beta=1.0)
+    lo = ponder_loss({"steps": steps, "p_halt": p}, _batch(3), min_steps=3.0, floor_beta=0.0)
+    assert hi["total"] > lo["total"]                 # floor adds cost when avg_steps < min_steps
+
+def test_ponder_uniform_warmup_runs():
+    K = 4
+    steps = [_step(3) for _ in range(K)]
+    p = torch.softmax(torch.randn(3, K), dim=1)
+    out = ponder_loss({"steps": steps, "p_halt": p}, _batch(3), uniform=True)
+    assert torch.isfinite(out["total"])

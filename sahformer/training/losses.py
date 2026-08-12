@@ -38,18 +38,28 @@ def per_sample_loss(out, batch, w_policy: float = 1.0, w_value: float = 0.1,
     return w_policy * policy + w_value * value + w_time * time
 
 def ponder_loss(pt_out, batch, prior_lambda: float = 0.4, beta: float = 0.01,
-                w_policy: float = 1.0, w_value: float = 0.1, w_time: float = 0.2):
-    """PonderNet loss: halt-probability-weighted task loss + KL to a geometric prior."""
+                w_policy: float = 1.0, w_value: float = 0.1, w_time: float = 0.2,
+                min_steps: float = 0.0, floor_beta: float = 0.0, uniform: bool = False):
+    """PonderNet loss: halt-probability-weighted task loss + KL to a geometric prior.
+
+    Failsafes against halting collapse:
+      - `uniform=True` (a warmup): weight all ponder steps equally, so the ponder block learns to
+        refine *before* the halting is allowed to skip it.
+      - `min_steps`/`floor_beta`: penalize the expected step count when it drops below `min_steps`,
+        a hard floor against collapse-to-1.
+    """
     steps, p = pt_out["steps"], pt_out["p_halt"]     # p: (B, K)
     K = p.shape[1]
-    task = 0.0
-    for n in range(K):
-        task = task + p[:, n] * per_sample_loss(steps[n], batch, w_policy, w_value, w_time)
-    task = task.mean()
     n_idx = torch.arange(K, device=p.device, dtype=torch.float32)
+    step_losses = [per_sample_loss(steps[n], batch, w_policy, w_value, w_time) for n in range(K)]
+    if uniform:
+        task = torch.stack(step_losses, dim=1).mean()             # train every step equally
+    else:
+        task = sum(p[:, n] * step_losses[n] for n in range(K)).mean()
     prior = prior_lambda * (1.0 - prior_lambda) ** n_idx
     prior = (prior / prior.sum()).unsqueeze(0)
     kl = (p * (torch.log(p + 1e-9) - torch.log(prior + 1e-9))).sum(dim=1).mean()
-    total = task + beta * kl
-    avg_steps = (p * (n_idx + 1)).sum(dim=1).mean().item()
-    return {"total": total, "task": task, "kl": kl, "avg_steps": avg_steps}
+    exp_steps = (p * (n_idx + 1)).sum(dim=1).mean()               # tensor (keeps gradient)
+    floor = torch.relu(torch.tensor(float(min_steps), device=p.device) - exp_steps)
+    total = task + beta * kl + floor_beta * floor
+    return {"total": total, "task": task, "kl": kl, "avg_steps": exp_steps.item()}

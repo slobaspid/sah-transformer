@@ -23,6 +23,9 @@ class TrainConfig:
     stream: bool = False          # True: stream shards from disk (for datasets too big for RAM)
     resume: str = ""              # path to a checkpoint to continue training from
     ponder_beta: float = 0.01     # PonderNet KL weight (raise if halting collapses to 1 step)
+    ponder_warmup: int = 0        # steps to train all ponder steps equally before adaptive halting
+    ponder_min_steps: float = 0.0  # floor on expected ponder steps (failsafe vs collapse)
+    ponder_floor_beta: float = 0.0  # weight on the min-steps floor penalty
     device: str = "cpu"
     seed: int = 0
     out_dir: str = "checkpoints"
@@ -112,7 +115,10 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
             if cfg.mode == "ponder":
                 pt = model.ponder_train(batch)
                 losses = ponder_loss(pt, batch, model_cfg.ponder_prior, cfg.ponder_beta,
-                                     cfg.w_policy, cfg.w_value, cfg.w_time)
+                                     cfg.w_policy, cfg.w_value, cfg.w_time,
+                                     min_steps=cfg.ponder_min_steps,
+                                     floor_beta=cfg.ponder_floor_beta,
+                                     uniform=(step < cfg.ponder_warmup))
                 losses.setdefault("policy", losses["task"])
                 losses.setdefault("value", losses["kl"])
                 losses.setdefault("time", torch.tensor(losses["avg_steps"]))
