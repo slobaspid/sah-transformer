@@ -41,11 +41,25 @@ class ValueHead(nn.Module):
         pooled = self.norm(tokens).mean(dim=1)
         return self.out(F.relu(self.hid(pooled)))
 
+def policy_difficulty(move_logits, eps: float = 1e-9):
+    """Two difficulty signals derived from the move distribution's spread, DETACHED so the
+    think-time loss can't push the move-guesser around:
+      - normalized entropy: ~0 when one move dominates (forced/easy), ~1 when moves are
+        spread out (ambiguous/hard)
+      - top-move probability: how confident the best move is
+    Returns (B, 2)."""
+    p = F.softmax(move_logits.detach(), dim=-1)
+    n = p.shape[-1]
+    entropy = -(p * (p + eps).log()).sum(-1, keepdim=True) / math.log(n)
+    top = p.max(-1, keepdim=True).values
+    return torch.cat([entropy, top], dim=-1)
+
 class ThinkTimeMDNHead(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         m = cfg.mdn_components
-        self.trunk = nn.Sequential(nn.Linear(cfg.dim_vit, cfg.head_hid_dim), nn.ReLU())
+        self.trunk = nn.Sequential(
+            nn.Linear(cfg.dim_vit + cfg.think_extra, cfg.head_hid_dim), nn.ReLU())
         self.pi = nn.Linear(cfg.head_hid_dim, m)
         self.mu = nn.Linear(cfg.head_hid_dim, m)
         self.sigma = nn.Linear(cfg.head_hid_dim, m)

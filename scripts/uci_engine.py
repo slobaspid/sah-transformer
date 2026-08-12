@@ -52,9 +52,14 @@ def main():
     ckpt = _find_ckpt()
     model = build_model("full", ModelConfig())
     if ckpt and os.path.exists(ckpt):
-        load_checkpoint(ckpt, model)
+        try:
+            load_checkpoint(ckpt, model)
+        except Exception as e:                       # stale/incompatible checkpoint
+            sys.stderr.write(f"WARNING: could not load {ckpt} ({e}); retrain needed. "
+                             "Playing untrained.\n")
+            sys.stderr.flush()
     else:
-        sys.stderr.write("WARNING: SAHFORMER_CKPT not set or missing — playing untrained!\n")
+        sys.stderr.write("WARNING: no checkpoint found — playing untrained!\n")
         sys.stderr.flush()
     model.eval()
     def _initial_pace():

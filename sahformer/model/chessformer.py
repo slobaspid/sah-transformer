@@ -3,7 +3,7 @@ import torch.nn as nn
 from sahformer.model.config import ModelConfig
 from sahformer.model.embedding import InputEmbedding
 from sahformer.model.encoder import Encoder
-from sahformer.model.heads import PolicyHead, ValueHead, ThinkTimeMDNHead
+from sahformer.model.heads import PolicyHead, ValueHead, ThinkTimeMDNHead, policy_difficulty
 
 class FaithfulChessformer(nn.Module):
     """Clock-blind Maia-3-faithful backbone + our MDN think-time head."""
@@ -21,8 +21,10 @@ class FaithfulChessformer(nn.Module):
                              batch["elo_self"], batch["elo_opp"])
         enc = self.encoder(tok)                       # (B,64,dim_vit)
         pooled = enc.mean(dim=1)
+        move_logits = self.policy(enc)
+        think_in = torch.cat([pooled, policy_difficulty(move_logits)], dim=-1)
         return {
-            "move_logits": self.policy(enc),
+            "move_logits": move_logits,
             "value_logits": self.value(enc),
-            "mdn": self.think(pooled),
+            "mdn": self.think(think_in),
         }

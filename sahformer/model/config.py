@@ -13,6 +13,7 @@ class ModelConfig:
     gab_per_square_dim: int = 0   # d1 (0 => avg-pool variant)
     head_hid_dim: int = 256
     mdn_components: int = 3
+    think_extra: int = 2          # difficulty features (policy entropy + top-move prob) into the time head
     n_squares: int = 64
     temporal_dim: int = 21        # Plan 3
     t_ctx: int = 128              # Plan 3
