@@ -15,9 +15,7 @@ import webbrowser
 # make the project importable when run directly (python scripts/watch_selfplay.py)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sahformer.model.config import ModelConfig
-from sahformer.training.build import build_model
-from sahformer.training.loop import load_checkpoint
+from sahformer.training.loop import load_model
 from sahformer.play import selfplay_frames
 
 _HTML = """<!doctype html><html><head><meta charset="utf-8"><title>sahformer self-play</title>
@@ -75,8 +73,7 @@ def main():
     ap.add_argument("--out", default="selfplay.html")
     args = ap.parse_args()
 
-    model = build_model("full", ModelConfig())
-    load_checkpoint(args.ckpt, model)
+    model, _ = load_model(args.ckpt, mode="full")
     frames, caps = selfplay_frames(model, max_plies=args.plies, elo=args.elo,
                                    temperature=args.temperature, seed=args.seed,
                                    think_temp=args.think_temp)

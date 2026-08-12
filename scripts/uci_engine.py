@@ -21,7 +21,7 @@ import torch
 import torch.nn.functional as F
 from sahformer.model.config import ModelConfig
 from sahformer.training.build import build_model
-from sahformer.training.loop import load_checkpoint
+from sahformer.training.loop import load_model
 from sahformer.encoding import encode_board, encode_move, build_temporal
 from sahformer.records import _stack_history
 from sahformer.model.heads import move_to_index
@@ -50,17 +50,18 @@ def _find_ckpt():
 
 def main():
     ckpt = _find_ckpt()
-    model = build_model("full", ModelConfig())
     if ckpt and os.path.exists(ckpt):
         try:
-            load_checkpoint(ckpt, model)
-        except Exception as e:                       # stale/incompatible checkpoint
+            model, _ = load_model(ckpt, mode="full")   # auto-matches the trained size
+        except Exception as e:                         # stale/incompatible checkpoint
             sys.stderr.write(f"WARNING: could not load {ckpt} ({e}); retrain needed. "
                              "Playing untrained.\n")
             sys.stderr.flush()
+            model = build_model("full", ModelConfig())
     else:
         sys.stderr.write("WARNING: no checkpoint found — playing untrained!\n")
         sys.stderr.flush()
+        model = build_model("full", ModelConfig())
     model.eval()
     def _initial_pace():
         for i, a in enumerate(sys.argv):

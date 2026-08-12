@@ -4,7 +4,7 @@ from dataclasses import dataclass, asdict
 import torch
 from torch.utils.data import DataLoader
 from sahformer.model.config import ModelConfig
-from sahformer.dataset import ShardDataset
+from sahformer.dataset import ShardDataset, StreamingShardDataset
 from sahformer.training.build import build_model
 from sahformer.training.losses import compute_losses
 
@@ -20,6 +20,7 @@ class TrainConfig:
     w_value: float = 0.1
     w_time: float = 0.2
     amp: bool = False
+    stream: bool = False          # True: stream shards from disk (for datasets too big for RAM)
     device: str = "cpu"
     seed: int = 0
     out_dir: str = "checkpoints"
@@ -32,14 +33,28 @@ def _lr_scale(step, warmup, total):
     prog = (step - warmup) / max(1, total - warmup)
     return 0.5 * (1.0 + math.cos(math.pi * min(1.0, prog)))
 
-def save_checkpoint(path, model, cfg, step, best_metric):
+def save_checkpoint(path, model, cfg, step, best_metric, model_cfg=None):
     torch.save({"model_state": model.state_dict(), "cfg": asdict(cfg),
+                "model_cfg": asdict(model_cfg) if model_cfg is not None else None,
                 "step": step, "best_metric": best_metric}, path)
 
 def load_checkpoint(path, model):
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     model.load_state_dict(ckpt["model_state"])
     return ckpt
+
+def load_model(path, mode=None):
+    """Rebuild the exact model a checkpoint was trained with (any size) and load its weights.
+    Reads the saved model_cfg so it works even if the model was trained bigger than default."""
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    mc = ckpt.get("model_cfg")
+    model_cfg = ModelConfig(**mc) if mc else ModelConfig()
+    if mode is None:
+        mode = ckpt.get("cfg", {}).get("mode", "full")
+    model = build_model(mode, model_cfg)
+    model.load_state_dict(ckpt["model_state"])
+    model.eval()
+    return model, model_cfg
 
 def _infinite(loader):
     while True:
@@ -57,8 +72,12 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
     dev_type = "cuda" if "cuda" in cfg.device else "cpu"
     scaler = torch.amp.GradScaler(dev_type, enabled=cfg.amp)
 
-    loader = DataLoader(ShardDataset(shard_paths), batch_size=cfg.batch_size,
-                        shuffle=True, drop_last=False)
+    if cfg.stream:
+        ds = StreamingShardDataset(shard_paths, shuffle=True, seed=cfg.seed)
+        loader = DataLoader(ds, batch_size=cfg.batch_size, drop_last=False)
+    else:
+        loader = DataLoader(ShardDataset(shard_paths), batch_size=cfg.batch_size,
+                            shuffle=True, drop_last=False)
     data = _infinite(loader)
     model.train()
     best = float("inf")
@@ -86,9 +105,12 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
                   f"policy={rec['policy']:.4f} time={rec['time']:.4f} acc={rec['move_acc']:.3f}")
         if total < best:
             best = total
-            save_checkpoint(os.path.join(cfg.out_dir, "best.pt"), model, cfg, step, best)
+            save_checkpoint(os.path.join(cfg.out_dir, "best.pt"), model, cfg, step, best,
+                            model_cfg=model_cfg)
         if (step + 1) % cfg.ckpt_every == 0:
-            save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, step, best)
+            save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, step, best,
+                            model_cfg=model_cfg)
 
-    save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, cfg.max_steps - 1, best)
+    save_checkpoint(os.path.join(cfg.out_dir, "last.pt"), model, cfg, cfg.max_steps - 1, best,
+                    model_cfg=model_cfg)
     return {"history": history, "best": best, "model": model}
