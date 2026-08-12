@@ -68,10 +68,13 @@ class ThinkTimeMDNHead(nn.Module):
         h = self.trunk(pooled)
         return self.pi(h), self.mu(h), self.sigma(h)
 
-def mdn_nll(pi_logits, mu, sigma_param, target_time, eps: float = 1e-6):
+def mdn_nll_per_sample(pi_logits, mu, sigma_param, target_time, eps: float = 1e-6):
     x = torch.log(target_time.clamp_min(eps)).unsqueeze(-1)
     log_pi = F.log_softmax(pi_logits, dim=-1)
     sigma = F.softplus(sigma_param) + 1e-3
     z = (x - mu) / sigma
     comp = -0.5 * z * z - torch.log(sigma) - 0.5 * math.log(2 * math.pi)
-    return -(torch.logsumexp(log_pi + comp, dim=-1)).mean()
+    return -(torch.logsumexp(log_pi + comp, dim=-1))          # (B,)
+
+def mdn_nll(pi_logits, mu, sigma_param, target_time, eps: float = 1e-6):
+    return mdn_nll_per_sample(pi_logits, mu, sigma_param, target_time, eps).mean()
