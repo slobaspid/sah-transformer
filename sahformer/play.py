@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from sahformer.encoding import encode_board, encode_move, build_temporal
 from sahformer.records import _stack_history
 from sahformer.model.heads import move_to_index
+from sahformer.search import SearchConfig, time_to_sims, mcts_move
 
 def _softmax_np(x):
     x = x - x.max()
@@ -32,7 +33,8 @@ def _sample_think_time(mdn, rng, think_temp=1.0):
 
 @torch.no_grad()
 def self_play(model, max_plies=200, elo=1500, temperature=1.0,
-              start_clock=180.0, device="cpu", seed=0, think_temp=1.0):
+              start_clock=180.0, device="cpu", seed=0, think_temp=1.0,
+              search=False, search_cfg=None):
     """Model plays both sides. Yields one dict per ply (the move it's about to play,
     its sampled think-time, and both clocks). Ends on game over, ply cap, or a flag."""
     rng = np.random.default_rng(seed)
@@ -55,17 +57,24 @@ def self_play(model, max_plies=200, elo=1500, temperature=1.0,
             "temporal": torch.from_numpy(temporal).float().unsqueeze(0).to(device),
         }
         out = model(batch)
-        logits = out["move_logits"][0]
-        legal = list(board.legal_moves)
-        idxs = [move_to_index(*encode_move(board, m)) for m in legal]
-        scores = logits[idxs]
-        if temperature <= 1e-6:                          # temp 0 = always the top move
-            move = legal[int(scores.argmax().item())]
-        else:
-            probs = F.softmax(scores / temperature, dim=-1).detach().cpu().numpy()
-            probs = probs / probs.sum()
-            move = legal[int(rng.choice(len(legal), p=probs))]
         think = _sample_think_time(out["mdn"], rng, think_temp=think_temp)
+        if search:
+            scfg = search_cfg or SearchConfig(elo=elo, temperature=temperature)
+            sims = time_to_sims(think, scfg)
+            move, _ = mcts_move(model, board, plane_hist, sims, scfg,
+                                my_clock=clock[mover], opp_clock=clock[not mover],
+                                ply=ply, device=device, seed=int(rng.integers(1 << 30)))
+        else:
+            logits = out["move_logits"][0]
+            legal = list(board.legal_moves)
+            idxs = [move_to_index(*encode_move(board, m)) for m in legal]
+            scores = logits[idxs]
+            if temperature <= 1e-6:                      # temp 0 = always the top move
+                move = legal[int(scores.argmax().item())]
+            else:
+                probs = F.softmax(scores / temperature, dim=-1).detach().cpu().numpy()
+                probs = probs / probs.sum()
+                move = legal[int(rng.choice(len(legal), p=probs))]
 
         clock[mover] -= think
         flagged = clock[mover] <= 0.0
@@ -83,7 +92,8 @@ def self_play(model, max_plies=200, elo=1500, temperature=1.0,
         ply += 1
 
 def selfplay_frames(model, max_plies=120, elo=1500, temperature=1.0,
-                    start_clock=180.0, seed=0, size=400, think_temp=1.0):
+                    start_clock=180.0, seed=0, size=400, think_temp=1.0,
+                    search=False, search_cfg=None):
     """Play one self-play game and return (svg_frames, captions) for a viewer.
     frames[0] is the start position; each later frame is the board after a move."""
     import chess.svg
@@ -93,7 +103,7 @@ def selfplay_frames(model, max_plies=120, elo=1500, temperature=1.0,
              "black": float(start_clock), "mover": ""}]
     for rec in self_play(model, max_plies=max_plies, elo=elo, temperature=temperature,
                          start_clock=start_clock, device="cpu", seed=seed,
-                         think_temp=think_temp):
+                         think_temp=think_temp, search=search, search_cfg=search_cfg):
         board.push(rec["move"])
         frames.append(chess.svg.board(board, size=size, lastmove=rec["move"]))
         caps.append({"san": rec["san"], "think": rec["think"],

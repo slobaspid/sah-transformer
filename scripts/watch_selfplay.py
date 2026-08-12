@@ -69,14 +69,19 @@ def main():
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--think-temp", type=float, default=0.25,
                     help="timing randomness: 1=full human spread, lower=calmer, 0=typical only")
+    ap.add_argument("--search", action="store_true", help="use time-adaptive MCTS for moves")
+    ap.add_argument("--max-sims", type=int, default=256, help="cap on search simulations")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="selfplay.html")
     args = ap.parse_args()
 
+    from sahformer.search import SearchConfig
+    scfg = SearchConfig(elo=args.elo, temperature=args.temperature, max_sims=args.max_sims)
     model, _ = load_model(args.ckpt, mode="full")
     frames, caps = selfplay_frames(model, max_plies=args.plies, elo=args.elo,
                                    temperature=args.temperature, seed=args.seed,
-                                   think_temp=args.think_temp)
+                                   think_temp=args.think_temp,
+                                   search=args.search, search_cfg=scfg)
     html = _HTML.format(frames=json.dumps(frames), caps=json.dumps(caps), speed=args.speed)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
