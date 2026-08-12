@@ -25,8 +25,29 @@ from sahformer.encoding import encode_board, encode_move, build_temporal
 from sahformer.records import _stack_history
 from sahformer.model.heads import move_to_index
 
+def _find_ckpt():
+    # 1) explicit: --ckpt PATH, or any .pt argument
+    for i, a in enumerate(sys.argv):
+        if a == "--ckpt" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if a.lower().endswith(".pt"):
+            return a
+    # 2) environment variable
+    env = os.environ.get("SAHFORMER_CKPT", "")
+    if env:
+        return env
+    # 3) common default locations (so a GUI can launch it with no config)
+    home = os.path.expanduser("~")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for c in (os.path.join(home, "Downloads", "model_full", "best.pt"),
+              os.path.join(home, "Downloads", "best.pt"),
+              os.path.join(root, "best.pt")):
+        if os.path.exists(c):
+            return c
+    return ""
+
 def main():
-    ckpt = os.environ.get("SAHFORMER_CKPT", "")
+    ckpt = _find_ckpt()
     model = build_model("full", ModelConfig())
     if ckpt and os.path.exists(ckpt):
         load_checkpoint(ckpt, model)
