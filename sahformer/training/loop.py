@@ -26,6 +26,7 @@ class TrainConfig:
     ponder_warmup: int = 0        # steps to train all ponder steps equally before adaptive halting
     ponder_min_steps: float = 0.0  # floor on expected ponder steps (failsafe vs collapse)
     ponder_floor_beta: float = 0.0  # weight on the min-steps floor penalty
+    grad_clip: float = 1.0        # max gradient norm (0 = off) — prevents NaN blow-ups
     device: str = "cpu"
     seed: int = 0
     out_dir: str = "checkpoints"
@@ -126,7 +127,14 @@ def train(cfg: TrainConfig, shard_paths, model_cfg: ModelConfig = None):
             else:
                 out = model(batch)
                 losses = compute_losses(out, batch, cfg.w_policy, cfg.w_value, cfg.w_time)
-        scaler.scale(losses["total"]).backward()
+        total_loss = losses["total"]
+        if not torch.isfinite(total_loss):
+            opt.zero_grad(set_to_none=True)          # skip a NaN/inf batch, don't corrupt weights
+            continue
+        scaler.scale(total_loss).backward()
+        if cfg.grad_clip and cfg.grad_clip > 0:
+            scaler.unscale_(opt)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
         scaler.step(opt)
         scaler.update()
 
